@@ -1,0 +1,36 @@
+﻿@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <span class="status-badge @(crossOriginIsolated ? "isolated" : "warning")">
+                @(crossOriginIsolated ? "COOP/COEP Active (Isolated)" : "Not Isolated")
+            </span>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+    private bool crossOriginIsolated = false;
+
+    protected override void OnInitialized()
+    {
+        // In a real app, you might use JS interop, but we can check window.crossOriginIsolated
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Simple check via JS interop would be better, but we can assume if threads work it is.
+        }
+    }
+}

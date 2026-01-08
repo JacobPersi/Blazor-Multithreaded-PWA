@@ -1,0 +1,168 @@
+@page "/parallel-benchmark"
+@using System.Threading
+@using System.Diagnostics
+@using Client.Components
+
+<PageTitle>Parallel Benchmark</PageTitle>
+
+<div class="benchmark-header">
+    <h1>Parallel.ForEach Benchmark</h1>
+    <p>Using the Task Parallel Library to process a large dataset across all available workers.</p>
+</div>
+
+<div class="benchmark-grid">
+    <div class="control-panel">
+        <div class="input-group">
+            <label>Max Degree of Parallelism: @maxParallelism</label>
+            <input type="range" min="1" max="12" @bind="maxParallelism" @bind:event="oninput" />
+        </div>
+        
+        <div class="input-group">
+            <label>Workload Intensity: @intensity</label>
+            <input type="range" min="100" max="10000" @bind="intensity" step="100" @bind:event="oninput" />
+        </div>
+
+        <button class="primary-button" @onclick="StartBenchmark" disabled="@isRunning">
+            @if (isRunning) { <span>Running...</span> } else { <span>Parallelize!</span> }
+        </button>
+    </div>
+
+    <div class="stats-panel">
+        <SmoothnessVisualizer />
+        
+        <div class="metric">
+            <label>Tasks Completed:</label>
+            <span class="value">@completedTasks.ToString("N0") / @totalTasks.ToString("N0")</span>
+        </div>
+        
+        <div class="metric">
+            <label>Throughput:</label>
+            <span class="value">@throughput.ToString("F0") ops/s</span>
+        </div>
+
+        <div class="progress-container">
+            <div class="progress-bar" style="width: @(progress)%"></div>
+        </div>
+    </div>
+</div>
+
+<div class="visual-feedback">
+    <div class="processing-core">
+        <div class="core-inner" style="transform: scale(@(1 + (throughput/10000.0))); opacity: @(isRunning ? 1 : 0.2)"></div>
+        <div class="core-pulse @(isRunning ? "pulsing" : "")"></div>
+    </div>
+</div>
+
+<style>
+    .benchmark-grid {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .visual-feedback {
+        display: flex;
+        justify-content: center;
+        padding: 50px;
+        background: rgba(0,0,0,0.2);
+        border-radius: 20px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .processing-core {
+        width: 150px;
+        height: 150px;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .core-inner {
+        width: 100px;
+        height: 100px;
+        background: var(--accent);
+        border-radius: 50%;
+        box-shadow: 0 0 30px var(--accent-glow);
+        transition: transform 0.1s ease;
+    }
+
+    .core-pulse {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        border: 2px solid var(--accent);
+        border-radius: 50%;
+        opacity: 0;
+    }
+
+    .pulsing {
+        animation: pulse-out 1s infinite;
+    }
+
+    @@keyframes pulse-out {
+        0% { transform: scale(1); opacity: 0.8; }
+        100% { transform: scale(2); opacity: 0; }
+    }
+</style>
+
+@code {
+    private int maxParallelism = 4;
+    private int intensity = 1000;
+    private bool isRunning = false;
+    private int totalTasks = 10000;
+    private int completedTasks = 0;
+    private double throughput = 0;
+    private double progress = 0;
+
+    private async Task StartBenchmark()
+    {
+        isRunning = true;
+        completedTasks = 0;
+        throughput = 0;
+        progress = 0;
+
+        var sw = Stopwatch.StartNew();
+        var startTime = DateTime.UtcNow;
+
+        var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallelism };
+
+        var benchmarkTask = Task.Run(() => {
+            Parallel.For(0, totalTasks, options, i => {
+                // Simulate some work
+                double result = 0;
+                for (int j = 0; j < intensity; j++)
+                {
+                    result += Math.Sin(j) * Math.Cos(j);
+                }
+                
+                Interlocked.Increment(ref completedTasks);
+                
+                // Update throughput occasionally
+                if (completedTasks % 100 == 0)
+                {
+                    var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                    if (elapsed > 0)
+                    {
+                        throughput = completedTasks / elapsed;
+                        progress = (double)completedTasks / totalTasks * 100;
+                    }
+                }
+            });
+        });
+
+        while (!benchmarkTask.IsCompleted)
+        {
+            StateHasChanged();
+            await Task.Delay(100);
+        }
+
+        sw.Stop();
+        isRunning = false;
+        progress = 100;
+        throughput = totalTasks / sw.Elapsed.TotalSeconds;
+        StateHasChanged();
+    }
+}
