@@ -8,8 +8,8 @@ self.addEventListener('fetch', event => event.respondWith(onFetch(event)));
 
 const cacheNamePrefix = 'offline-cache-';
 const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
-const offlineAssetsInclude = [/\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.json$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/];
-const offlineAssetsExclude = [/^service-worker\.js$/];
+const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.json$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/ ];
+const offlineAssetsExclude = [ /^service-worker\.js$/ ];
 
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
 const base = "/";
@@ -18,7 +18,6 @@ const manifestUrlList = self.assetsManifest.assets.map(asset => new URL(asset.ur
 
 async function onInstall(event) {
     console.info('Service worker: Install');
-    self.skipWaiting();
 
     // Fetch and cache all matching items from the assets manifest
     const assetsRequests = self.assetsManifest.assets
@@ -30,7 +29,6 @@ async function onInstall(event) {
 
 async function onActivate(event) {
     console.info('Service worker: Activate');
-    event.waitUntil(self.clients.claim());
 
     // Delete unused caches
     const cacheKeys = await caches.keys();
@@ -42,6 +40,9 @@ async function onActivate(event) {
 async function onFetch(event) {
     let cachedResponse = null;
     if (event.request.method === 'GET') {
+        // For all navigation requests, try to serve index.html from cache,
+        // unless that request is for an offline resource.
+        // If you need some URLs to be server-rendered, edit the following check to exclude those URLs
         const shouldServeIndexHtml = event.request.mode === 'navigate'
             && !manifestUrlList.some(url => url === event.request.url);
 
@@ -50,26 +51,5 @@ async function onFetch(event) {
         cachedResponse = await cache.match(request);
     }
 
-    const responsePromise = cachedResponse || fetch(event.request);
-
-    return responsePromise.then(resp => {
-        const url = new URL(event.request.url);
-
-        // Don't modify if it's not a success or if it's debug/map traffic
-        if (!resp || resp.status === 0 ||
-            url.pathname.includes('_framework/debug') ||
-            url.pathname.endsWith('.map')) {
-            return resp;
-        }
-
-        const newHeaders = new Headers(resp.headers);
-        newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
-        newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
-
-        return new Response(resp.body, {
-            status: resp.status,
-            statusText: resp.statusText,
-            headers: newHeaders,
-        });
-    });
+    return cachedResponse || fetch(event.request);
 }

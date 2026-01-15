@@ -1,6 +1,6 @@
 {
-  "name": "Client",
-  "short_name": "Client",
+  "name": "PWA",
+  "short_name": "PWA",
   "id": "./",
   "start_url": "./",
   "display": "standalone",

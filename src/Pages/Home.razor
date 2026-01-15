@@ -1,88 +1,197 @@
 ﻿@page "/"
+@using System.Diagnostics
+@using SkiaSharp
+@inject IJSRuntime JS
+@implements IDisposable
 
-<PageTitle>Blazor 2D - Multithreaded Benchmarks</PageTitle>
+<PageTitle>SkiaSharp + Multithreading</PageTitle>
 
-<div class="hero-section">
-    <h1>Multithreaded Blazor <span class="accent">.NET 10</span></h1>
-    <p class="lead">Harnessing the power of multi-core processors directly in the browser with WebAssembly Threads.</p>
+<div class="container-fluid py-4 h-100 d-flex flex-column">
+    <div class="row mb-3 flex-grow-0">
+        <div class="col">
+            <h2 class="fw-bold"><i class="bi bi-palette-fill text-primary"></i> SkiaSharp MT Lab</h2>
+            <p class="text-muted">Rendering with <b>SkiaSharp 3.0</b> on a background thread while stressing the CPU.</p>
+        </div>
+    </div>
+
+    <div class="row g-4 flex-grow-1">
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-lg bg-black overflow-hidden h-100 position-relative">
+                <canvas id="bouncingCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                
+                <!-- Overlay Info -->
+                <div class="position-absolute bottom-0 start-0 m-4 p-3 rounded-4 bg-dark bg-opacity-75 text-white border border-secondary shadow-sm" style="backdrop-filter: blur(8px);">
+                    <div class="row g-3 align-items-center">
+                        <div class="col-auto">
+                            <span class="text-secondary smaller d-block text-uppercase">Engine</span>
+                            <span class="fw-bold">SkiaSharp 3.0</span>
+                        </div>
+                        <div class="col-auto border-start border-secondary">
+                            <span class="text-secondary smaller d-block text-uppercase">Performance</span>
+                            <span class="fw-bold @(fps < 50 ? "text-warning" : "text-success")">@(fps) FPS</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="position-absolute top-0 end-0 m-4">
+                    <div class="badge rounded-pill bg-primary border border-white p-2 px-3 shadow-lg">
+                        <span class="spinner-grow spinner-grow-sm me-2"></span> Wasm Threads: ACTIVE
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-lg h-100 bg-white p-2">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-4">Background Worker</h5>
+                    
+                    <div class="mb-5 shadow-sm p-3 rounded-4 bg-light border">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="fw-medium text-dark">CPU Stressor</span>
+                            <span class="badge @(isCalculating ? "bg-warning text-dark" : "bg-success-subtle text-success") px-3 py-2">
+                                @(isCalculating ? "Calculating" : "Idle")
+                            </span>
+                        </div>
+                        <div class="text-center py-2">
+                            <h2 class="display-6 fw-bold text-dark mb-0">@threadStatus</h2>
+                            <span class="text-secondary smaller text-uppercase fw-semibold">Math Thread Progress</span>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary btn-lg w-100 py-3 rounded-4 shadow mb-4" 
+                            @onclick="RunHeavyTask" disabled="@isCalculating">
+                        @if (isCalculating) {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                            <span>Stressing CPU...</span>
+                        } else {
+                            <i class="bi bi-lightning-charge-fill me-2"></i>
+                            <span>Run Heavy Task</span>
+                        }
+                    </button>
+
+                    <div class="alert alert-secondary border-0 rounded-4 smaller lh-base">
+                        <b>Architecture:</b> 
+                        1. Physics runs on a <code>Task.Run</code> background thread.<br/>
+                        2. <b>SkiaSharp</b> renders the frame to a pixel buffer on that same thread.<br/>
+                        3. The buffer is pushed to the <code>OffscreenCanvas</code> (via JS) asynchronously.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
-<div class="features-grid">
-    <div class="feature-card">
-        <div class="icon">🚀</div>
-        <h3>High Performance</h3>
-        <p>Run intensive computations on background Web Workers without blocking the UI thread.</p>
-    </div>
-    <div class="feature-card">
-        <div class="icon">🧵</div>
-        <h3>Native Threads</h3>
-        <p>Uses standard C# Threading, Task Parallel Library, and ThreadPool mapped to Browser Workers.</p>
-    </div>
-    <div class="feature-card">
-        <div class="icon">🛡️</div>
-        <h3>Isolated Environment</h3>
-        <p>COOP/COEP headers applied via Service Worker to enable SharedArrayBuffer security.</p>
-    </div>
-</div>
+@code {
+    private bool isRunning = true;
+    private string threadStatus = "Ready";
+    private bool isCalculating = false;
+    private int fps = 0;
+    
+    // Physics State
+    private float x = 200, y = 200, dx = 400, dy = 350;
+    private float radius = 30;
+    private int width = 1200, height = 800; // Native resolution
+    
+    private Stopwatch stopwatch = new();
 
-<div class="action-box">
-    <h3>Ready to test?</h3>
-    <p>Choose a benchmark from the sidebar to start stressing the system.</p>
-</div>
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            stopwatch.Start();
+            _ = SimulationEngine(); 
+        }
+    }
+
+    private async Task SimulationEngine()
+    {
+        // Offload ALL logic and Skia rendering to a background thread
+        await Task.Run(async () => {
+            var lastTime = stopwatch.Elapsed.TotalSeconds;
+            var frameCount = 0;
+            var lastFpsTime = lastTime;
+
+            // Pre-allocate SkiaSharp resources on the background thread
+            using var bitmap = new SKBitmap(width, height);
+            using var canvas = new SKCanvas(bitmap);
+            using var ballPaint = new SKPaint { 
+                Color = SKColors.White, 
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill,
+                MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 5) // Add some Skia pizazz
+            };
+            using var corePaint = new SKPaint { Color = SKColors.Cyan, IsAntialias = true };
+
+            while (isRunning)
+            {
+                var currentTime = stopwatch.Elapsed.TotalSeconds;
+                var deltaTime = (float)(currentTime - lastTime);
+                lastTime = currentTime;
+
+                // 1. Update Physics
+                x += dx * deltaTime;
+                y += dy * deltaTime;
+
+                if (x - radius < 0) { dx = Math.Abs(dx); x = radius; }
+                else if (x + radius > width) { dx = -Math.Abs(dx); x = width - radius; }
+
+                if (y - radius < 0) { dy = Math.Abs(dy); y = radius; }
+                else if (y + radius > height) { dy = -Math.Abs(dy); y = height - radius; }
+
+                // 2. Render with SkiaSharp
+                canvas.Clear(SKColors.Transparent);
+                canvas.DrawCircle(x, y, radius + 5, ballPaint);
+                canvas.DrawCircle(x, y, radius - 5, corePaint);
+
+                // 3. Extract Pixels and Push to JS
+                // Since this is Task.Run, JS interop will be asynchronous automatically
+                _ = JS.InvokeVoidAsync("canvasHelper.draw", "bouncingCanvas", bitmap.Bytes, width, height);
+
+                // FPS & State Updates
+                frameCount++;
+                if (currentTime - lastFpsTime >= 1.0)
+                {
+                    fps = frameCount;
+                    frameCount = 0;
+                    lastFpsTime = currentTime;
+                    _ = InvokeAsync(StateHasChanged);
+                }
+
+                // Target ~60-120 FPS
+                await Task.Delay(8); 
+            }
+        });
+    }
+
+    private async Task RunHeavyTask()
+    {
+        isCalculating = true;
+        threadStatus = "Calculating...";
+        StateHasChanged();
+
+        var startTime = Stopwatch.GetTimestamp();
+        
+        await Task.Run(() => {
+            double r = 0;
+            for (long i = 0; i < 500_000_000; i++)
+            {
+                r += Math.Sqrt(i);
+            }
+        });
+        
+        var elapsed = Stopwatch.GetElapsedTime(startTime).TotalSeconds;
+        threadStatus = $"{elapsed:F1}s";
+        isCalculating = false;
+        StateHasChanged();
+    }
+
+    public void Dispose() => isRunning = false;
+}
 
 <style>
-    .hero-section {
-        padding: 40px 0;
-        text-align: center;
-        max-width: 800px;
-        margin: 0 auto;
-    }
-
-    .hero-section h1 {
-        font-size: 3.5rem;
-        margin-bottom: 20px;
-    }
-
-    .accent {
-        color: var(--accent);
-        text-shadow: 0 0 20px var(--accent-glow);
-    }
-
-    .lead {
-        font-size: 1.25rem;
-    }
-
-    .features-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 20px;
-        margin: 40px 0;
-    }
-
-    .feature-card {
-        background: var(--card-bg);
-        padding: 30px;
-        border-radius: 16px;
-        border: 1px solid var(--border-color);
-        text-align: center;
-        transition: transform 0.3s ease;
-    }
-
-    .feature-card:hover {
-        transform: translateY(-5px);
-        border-color: var(--accent);
-    }
-
-    .feature-card .icon {
-        font-size: 2.5rem;
-        margin-bottom: 15px;
-    }
-
-    .action-box {
-        background: linear-gradient(135deg, #121212 0%, #1a1a1a 100%);
-        padding: 40px;
-        border-radius: 20px;
-        border: 1px solid var(--border-color);
-        text-align: center;
-    }
+    .smaller { font-size: 0.7rem; }
+    canvas { background-image: radial-gradient(#222 1px, transparent 1px); background-size: 20px 20px; }
+    .card { border-radius: 1.5rem; }
+    .bg-black { background-color: #0b0b0b !important; }
 </style>

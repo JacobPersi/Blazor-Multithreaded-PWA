@@ -4,26 +4,39 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Client</title>
+    <title>SkiaSharp MT PWA</title>
     <base href="/" />
-    <link rel="preload" id="webassembly" />
     <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <link href="Client.styles.css" rel="stylesheet" />
-    <link href="manifest.webmanifest" rel="manifest" />
-    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
-    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
-    <script type="importmap"></script>
+    <link href="PWA.styles.css" rel="stylesheet" />
+    <script>
+        window.canvasHelper = {
+            draw: function (canvasId, data, width, height) {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                if (canvas.width !== width || canvas.height !== height) {
+                    canvas.width = width;
+                    canvas.height = height;
+                }
+
+                const imageData = new ImageData(new Uint8ClampedArray(data), width, height);
+                ctx.putImageData(imageData, 0, 0);
+            }
+        };
+    </script>
 </head>
 
 <body>
     <div id="app">
-        <svg class="loading-progress">
-            <circle r="40%" cx="50%" cy="50%" />
-            <circle r="40%" cx="50%" cy="50%" />
-        </svg>
-        <div class="loading-progress-text"></div>
+        <div
+            style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column;">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="mt-3">Starting SkiaSharp Multi-threaded Engine...</div>
+        </div>
     </div>
 
     <div id="blazor-error-ui">
@@ -32,24 +45,6 @@
         <span class="dismiss">🗙</span>
     </div>
     <script src="_framework/blazor.webassembly.js"></script>
-    <script>
-        navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).then(registration => {
-            registration.onupdatefound = () => {
-                const installingWorker = registration.installing;
-                installingWorker.onstatechange = () => {
-                    if (installingWorker.state === 'activated') {
-                        if (!window.crossOriginIsolated) {
-                            window.location.reload();
-                        }
-                    }
-                };
-            };
-        });
-
-        if (!window.crossOriginIsolated && navigator.serviceWorker.controller) {
-            window.location.reload();
-        }
-    </script>
 </body>
 
 </html>
